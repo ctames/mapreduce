@@ -6,9 +6,12 @@ use collections::HashMap;
 fn main() {
 	
 	// some strings with some words
-	let mut strings: Vec<String> = vec!("these are words".to_string(), 
-		"those are words".to_string(), 
-		"lots of words".to_string());
+	let mut strings: Vec<String> = vec!("these are a bunch of words".to_string(), 
+		"those are a bunch of words too".to_string(), 
+		"lots of words".to_string(),
+		"there certainly are a lot of words floating around here".to_string(),
+		"never before have I seen so many words just sitting about".to_string(),
+		"with not a thing to do".to_string());
 	
 	// function for map
 	fn create_pairs(s: &String) -> Vec<(String, int)> {
@@ -33,25 +36,33 @@ fn main() {
 }
 
 trait MapReduce {
-	fn mapreduce<K: Clone + Show + Hash + Equiv<K> + Eq, V: Clone + Show>(&mut self, fn(&String) -> Vec<(K, V)>, 
+	fn mapreduce<K: Clone + Show + Hash + Equiv<K> + Eq + Send, V: Clone + Show + Send>(&mut self, fn(&String) -> Vec<(K, V)>, 
 		fn(K, Vec<V>) -> Vec<(K, V)>);
 }
 
 impl MapReduce for Vec<String> {
-	fn mapreduce<K: Clone + Show + Hash + Equiv<K> + Eq, V: Clone + Show>(&mut self, mapf: fn(&String) -> Vec<(K, V)>, 
+	fn mapreduce<K: Clone + Show + Hash + Equiv<K> + Eq + Send, V: Clone + Show + Send>(&mut self, mapf: fn(&String) -> Vec<(K, V)>, 
 		redf: fn(K, Vec<V>) -> Vec<(K, V)>) {
 		
-		let mut values_lists: Vec<Vec<(K, V)>> = vec!();
+		let (sender, receiver): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = channel();
+		let mut chans: int = 0;
 		
 		// map 
 		for item in (*self).iter() {
-			values_lists.push(mapf(item)); 
+			chans += 1;			
+			let item_owned = item.clone();
+			let sender_child = sender.clone();
+			spawn(proc() {
+				
+				sender_child.send(mapf(&item_owned.clone()));
+			});
 		}
 		
 		// intermediate 
 		let mut kv_map: HashMap<K, Vec<V>> = HashMap::new();
-		for list in values_lists.iter() {
-			for pair in list.iter() {
+		for _ in range(0, chans) {
+			let ivals: Vec<(K, V)> = receiver.recv();
+			for pair in ivals.iter() {
 				let mut key: K;
 				let mut val: V;
 				match pair.clone() {
@@ -71,10 +82,20 @@ impl MapReduce for Vec<String> {
 		}
 			
 		// reduce
+		chans = 0;
 		for key in kv_map.keys() {
-			let vals = kv_map.get(key);
-			let rvals = redf(key.clone(), vals.clone());
-			println!("{}", rvals);		
+			chans += 1;
+			let vals = kv_map.get(key).clone();
+			let key_owned = key.clone();
+			let sender_child = sender.clone();
+			spawn(proc() {
+				sender_child.send(redf(key_owned.clone(), vals.clone()));
+			});		
+		}
+		
+		for _ in range(0, chans) {
+			let rvals: Vec<(K, V)> = receiver.recv();
+			println!("{}", rvals);
 		}		
 	}
 }	
