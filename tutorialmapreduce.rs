@@ -45,28 +45,27 @@ impl MapReduce for Vec<String> {
 		redf: fn(K, Vec<V>) -> Vec<(K, V)>) {
 		
 		let (sender, receiver): (Sender<Vec<(K, V)>>, Receiver<Vec<(K, V)>>) = channel();
-		let mut chans: int = 0;
+		let mut tasks: int = 0;
 		
 		// map 
-		for item in (*self).iter() {
-			chans += 1;			
+		for item in self.iter() {
+			tasks += 1;			
 			let item_owned = item.clone();
 			let sender_child = sender.clone();
-			spawn(proc() {
-				
-				sender_child.send(mapf(&item_owned.clone()));
+			spawn(proc() {			
+				sender_child.send(mapf(&item_owned));
 			});
 		}
 		
 		// intermediate 
 		let mut kv_map: HashMap<K, Vec<V>> = HashMap::new();
-		for _ in range(0, chans) {
+		for _ in range(0, tasks) {
 			let ivals: Vec<(K, V)> = receiver.recv();
 			for pair in ivals.iter() {
 				let mut key: K;
 				let mut val: V;
 				match pair.clone() {
-					(ref a, ref b) => {
+					(a, b) => {
 						key = a.clone();
 						val = b.clone();
 					}
@@ -82,18 +81,19 @@ impl MapReduce for Vec<String> {
 		}
 			
 		// reduce
-		chans = 0;
+		tasks = 0;
 		for key in kv_map.keys() {
-			chans += 1;
+			tasks += 1;
 			let vals = kv_map.get(key).clone();
 			let key_owned = key.clone();
 			let sender_child = sender.clone();
 			spawn(proc() {
-				sender_child.send(redf(key_owned.clone(), vals.clone()));
+				sender_child.send(redf(key_owned, vals));
 			});		
 		}
 		
-		for _ in range(0, chans) {
+		// print final values
+		for _ in range(0, tasks) {
 			let rvals: Vec<(K, V)> = receiver.recv();
 			println!("{}", rvals);
 		}		
